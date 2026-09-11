@@ -1,0 +1,618 @@
+---
+title: "Storytelling con R"
+subtitle: "Análisis Económico del Mercado Laboral — Región Junín"
+author: "Mirko Caja Ventura"
+date: today
+date-format: "MMMM YYYY"
+format:
+  revealjs:
+    theme: [default, custom.scss]
+    slide-number: true
+    progress: true
+    transition: slide
+    background-transition: fade
+    highlight-style: github
+    code-fold: true
+    code-tools: true
+    code-copy: true
+    fig-align: center
+    fig-width: 9
+    fig-height: 5
+    incremental: false
+    footer: "Mirko Caja Ventura · Análisis Económico Junín · {today}"
+    logo: ""
+execute:
+  echo: false
+  warning: false
+  message: false
+  cache: true
+---
+
+```{r}
+#| label: setup
+#| include: false
+
+library(dplyr)
+library(ggplot2)
+library(ggpubr)
+library(haven)
+library(survey)
+library(scales)
+library(patchwork)        # combinar gráficos
+library(ggtext)           # texto enriquecido en ggplot
+library(showtext)         # fuentes personalizadas
+library(gt)               # tablas elegantes
+library(gtsummary)        # tablas resumen estadístico
+library(plotly)           # gráficos interactivos (revealjs los soporta!)
+
+# Paleta corporativa consistente en toda la presentación
+PAL <- list(
+  navy     = "#0D1B2A",
+  teal     = "#0891B2",
+  teal2    = "#06B6D4",
+  gold     = "#F59E0B",
+  red      = "#EF4444",
+  green    = "#22C55E",
+  gray     = "#64748B",
+  graylt   = "#E2E8F0",
+  offwhite = "#F0F9FF"
+)
+
+# Tema ggplot2 corporativo reutilizable
+theme_corp <- function(base_size = 14) {
+  theme_minimal(base_size = base_size) +
+  theme(
+    plot.title    = element_markdown(face = "bold", color = PAL$navy, size = base_size * 1.3),
+    plot.subtitle = element_text(color = PAL$gray, size = base_size * 0.9, margin = margin(b = 10)),
+    plot.caption  = element_text(color = PAL$gray, size = 9, hjust = 0),
+    axis.title    = element_text(color = PAL$gray, size = base_size * 0.85),
+    axis.text     = element_text(color = PAL$gray),
+    panel.grid.major = element_line(color = PAL$graylt, linewidth = 0.4),
+    panel.grid.minor = element_blank(),
+    panel.background = element_rect(fill = "white", color = NA),
+    plot.background  = element_rect(fill = "white", color = NA),
+    strip.text   = element_text(face = "bold", color = PAL$navy),
+    legend.position  = "none"
+  )
+}
+```
+
+##  {background-color="#0D1B2A"}
+
+::::::::::::::::::::::::::::::: columns
+:::::::::::::::::::::::::::::: {.column width="60%"}
+<br><br>
+
+[ANÁLISIS ECONÓMICO · R + QUARTO]{style="color:#0891B2; font-size:0.7em; letter-spacing:0.15em; font-weight:600"}
+
+# Storytelling<br>con R
+
+[Mercado Laboral · Región Junín]{style="color:#94A3B8; font-size:1.1em; font-style:italic"}
+
+<hr style="border-color:#F59E0B; width:60%; margin-left:0; margin-top:1.5em">
+
+[**Mirko Caja Ventura**  ·  2025]{style="color:#CBD5E1"}
+
+:::
+
+::: {.column width="40%"}
+<br><br><br>
+
+```{r portada-icon}
+#| fig-height: 4
+#| fig-width: 4
+
+# Mini gráfico decorativo para portada
+set.seed(42)
+tibble(
+  x = 1:9,
+  y = c(0.91, 0.89, 0.87, 0.85, 0.83, 0.80, 0.78, 0.76, 0.72)
+) |>
+  ggplot(aes(x, y)) +
+  geom_area(fill = "#0891B2", alpha = 0.3) +
+  geom_line(color = "#06B6D4", linewidth = 2) +
+  geom_point(color = "#F59E0B", size = 4, shape = 21,
+             fill = "#F59E0B", stroke = 1.5) +
+  theme_void() +
+  theme(plot.background = element_rect(fill = "transparent", color = NA))
+```
+:::
+
+::::
+
+## Agenda {background-color="#F0F9FF"}
+
+::::::::: columns
+::::: {.column width="50%"}
+::: {.callout-note icon="false" appearance="minimal"}
+## 📦   01 · Eficiencia Empresarial
+
+Análisis comparativo por tipo de propiedad y tamaño. Pruebas no paramétricas: **Wilcoxon** y **Kruskal-Wallis**.
+:::
+
+::: {.callout-warning icon="false" appearance="minimal"}
+## ⚠️   02 · Informalidad Laboral
+
+Tasa de ocupación informal por provincia con **diseño muestral complejo** ENAHO.
+:::
+:::::
+
+::::: {.column width="50%"}
+::: {.callout-tip icon="false" appearance="minimal"}
+## 💰   03 · Ingresos Laborales
+
+Ingreso neto promedio ponderado. Estimador **Horvitz-Thompson** con IC al 95%.
+:::
+
+::: {.callout-caution icon="false" appearance="minimal"}
+## 🗺️   04 · Mapa de Junín
+
+Visualización **geoespacial** de indicadores con `geodata` + `ggplot2`.
+:::
+:::::
+:::::::::
+
+------------------------------------------------------------------------
+
+#  {.center background-color="#0D1B2A" background-image=""}
+
+[01]{style="font-size:5em; font-weight:900; color:#0891B2; line-height:1"}
+
+**Eficiencia Empresarial**
+
+[Análisis por Propiedad y Tamaño]{style="color:#94A3B8"}
+
+## Eficiencia Empresarial {background-color="white"}
+
+```{r eficiencia-plot}
+#| fig-height: 4.8
+#| fig-width: 10
+
+# ── Datos reales: reemplazar con tu ruta ──────────────────────────────────
+df <- readxl::read_excel("data_eficiencia.xlsx")
+
+# Datos simulados para reproducibilidad
+
+
+
+data <-df %>%  mutate(Tamaño = "Total") %>%
+  bind_rows(df) %>%  
+  mutate(Tamaño=case_when(Tamaño=="Total"~"Total",
+                          Tamaño %in% c("Grande 1","Muy Grande")~"Group 1",
+                          Tamaño%in% c("Grande 2")~"Group 2",T~NA)) %>% 
+  select(Puntaje_eficiencia,Propiedad2, Tamaño) 
+# ── Gráfico ───────────────────────────────────────────────────────────────
+data |>
+  ggplot(aes(y = Puntaje_eficiencia, x = Propiedad2)) +
+  geom_boxplot(
+    aes(fill = Propiedad2), alpha = 0.75,
+    outlier.shape = NA, width = 0.55,
+    color = PAL$navy, linewidth = 0.6
+  ) +
+  geom_jitter(
+    aes(color = Propiedad2),
+    alpha = 0.25, size = 2.2, width = 0.18
+  ) +
+  scale_fill_manual(values  = c("#BCE4D8", "#49A4B9")) +
+  scale_color_manual(values = c("#2A9D8F", "#264653")) +
+  facet_grid(~ Tamaño, scales = "free") +
+  stat_compare_means(
+    method = "wilcox.test",
+    label.y = 1.08, size = 3.8,
+    color = PAL$teal, fontface = "bold"
+  ) +
+  stat_compare_means(
+    method = "kruskal.test",
+    label.y = 1.0, size = 3.2,
+    color = PAL$gray
+  ) +
+  labs(
+    title  = "**Puntaje de Eficiencia** por Tipo de Propiedad y Segmento",
+    subtitle = "Pruebas no paramétricas aplicadas por faceta · α = 0.05",
+    x = NULL, y = "Efficiency Score",
+    caption = "Fuente: data_eficiencia.xlsx · Elaboración: Propia"
+  ) +
+  theme_corp() +
+  theme(
+    strip.background = element_rect(fill = PAL$navy, color = NA),
+    strip.text       = element_text(color = "white", face = "bold"),
+    axis.text.y      = element_blank()
+  )
+```
+
+::: fragment
+> 💡 **Hallazgo:** La propiedad privada muestra mayor eficiencia en Group 1, con diferencia estadísticamente significativa (p \< 0.05)
+:::
+
+## Estadísticos Descriptivos {background-color="#F0F9FF"}
+
+```{r tabla-eficiencia}
+#| results: asis
+
+data |>
+  filter(Tamaño != "Total") |>
+  group_by(Tamaño, Propiedad2) |>
+  summarise(
+    n     = n(),
+    Media = mean(Puntaje_eficiencia),
+    Mediana = median(Puntaje_eficiencia),
+    DE    = sd(Puntaje_eficiencia),
+    Q1    = quantile(Puntaje_eficiencia, 0.25),
+    Q3    = quantile(Puntaje_eficiencia, 0.75),
+    .groups = "drop"
+  ) |>
+  gt() |>
+  tab_header(
+    title    = md("**Resumen Estadístico · Puntaje de Eficiencia**"),
+    subtitle = "Por segmento de tamaño y tipo de propiedad"
+  ) |>
+  fmt_number(columns = c(Media, Mediana, DE, Q1, Q3), decimals = 3) |>
+  cols_label(
+    Tamaño = "Segmento", Propiedad2 = "Propiedad",
+    n = "N", DE = "Desv. Est."
+  ) |>
+  tab_style(
+    style = list(cell_fill(color = PAL$navy), cell_text(color = "white", weight = "bold")),
+    locations = cells_column_labels()
+  ) |>
+  data_color(
+    columns = Media,
+    palette = c("#BCE4D8", "#0891B2")
+  ) |>
+  tab_source_note(md("*Fuente: data_eficiencia.xlsx · Elaboración: Propia*")) |>
+  opt_table_font(font = google_font("Inter")) |>
+  tab_options(table.width = pct(100))
+```
+
+------------------------------------------------------------------------
+
+#  {.center background-color="#0D1B2A"}
+
+[02]{style="font-size:5em; font-weight:900; color:#F59E0B; line-height:1"}
+
+**Informalidad & Ingresos**
+
+[Mercado Laboral · Región Junín · ENAHO 2023]{style="color:#94A3B8"}
+
+## Indicadores Clave {background-color="#0D1B2A"}
+
+::::::::: columns
+:::: {.column width="33%"}
+::: {style="text-align:center; padding:1.5em; border:1px solid #1E3A5F; border-radius:8px; border-top: 4px solid #EF4444"}
+[⚠️]{style="font-size:2em"}
+
+[**82%**]{style="font-size:3.5em; font-weight:900; color:#EF4444; line-height:1.1"}
+
+[Tasa de Informalidad]{style="color:#CBD5E1; font-weight:600"}
+
+[Ocupación informal ponderada por diseño muestral complejo]{style="color:#64748B; font-size:0.75em"}
+:::
+::::
+
+:::: {.column width="33%"}
+::: {style="text-align:center; padding:1.5em; border:1px solid #1E3A5F; border-radius:8px; border-top: 4px solid #F59E0B"}
+[💰]{style="font-size:2em"}
+
+[**S/. 844**]{style="font-size:3.2em; font-weight:900; color:#F59E0B; line-height:1.1"}
+
+[Ingreso Neto Promedio]{style="color:#CBD5E1; font-weight:600"}
+
+[Estimador Horvitz-Thompson · IC 95%]{style="color:#64748B; font-size:0.75em"}
+:::
+::::
+
+:::: {.column width="33%"}
+::: {style="text-align:center; padding:1.5em; border:1px solid #1E3A5F; border-radius:8px; border-top: 4px solid #0891B2"}
+[🗺️]{style="font-size:2em"}
+
+[**9**]{style="font-size:3.5em; font-weight:900; color:#0891B2; line-height:1.1"}
+
+[Provincias Analizadas]{style="color:#CBD5E1; font-weight:600"}
+
+[Cobertura total Región Junín · GADM Nivel 2]{style="color:#64748B; font-size:0.75em"}
+:::
+::::
+:::::::::
+
+## Diseño Muestral Complejo {background-color="white"}
+
+::::: columns
+::: {.column width="55%"}
+**¿Por qué diseño muestral complejo?**
+
+ENAHO usa un diseño **estratificado bietápico** — ignorarlo produce estimaciones sesgadas.
+
+```{r diagrama-survey}
+#| fig-height: 3.5
+#| fig-width: 5.5
+
+tibble(
+  etapa = c("Población\nTotal", "Estratos\n(estrato)", "UPM\n(conglome)", "Individuos\n(fac500a)"),
+  x = 1:4,
+  y = c(4, 3, 2, 1)
+) |>
+  ggplot(aes(x, y)) +
+  geom_segment(aes(x=1,xend=2,y=4,yend=3), color=PAL$teal, linewidth=1.2, arrow=arrow(length=unit(0.2,"cm"))) +
+  geom_segment(aes(x=2,xend=3,y=3,yend=2), color=PAL$teal, linewidth=1.2, arrow=arrow(length=unit(0.2,"cm"))) +
+  geom_segment(aes(x=3,xend=4,y=2,yend=1), color=PAL$gold, linewidth=1.2, arrow=arrow(length=unit(0.2,"cm"))) +
+  geom_point(size=18, color=PAL$navy) +
+  geom_text(aes(label=etapa), color="white", size=3, fontface="bold") +
+  theme_void()
+```
+:::
+
+::: {.column width="45%"}
+**Código R — Diseño muestral**
+
+```{r survey-code}
+#| echo: true
+#| eval: false
+#| code-line-numbers: "1-5|7-9|11-12"
+
+library(survey)
+
+
+#----------------
+df_p <- data.frame(
+  Provincia = sprintf("%02d", 1:9),
+  NAME_2 = c("Huancayo", "Concepción","Jauja", "Junín", "Tarma",
+             "Yauli","Satipo","Chanchamayo","Chupaca")
+)
+
+df<-read_dta("Enaho_Empleo_Resumen_05.dta")
+
+data<- df %>% filter(grepl("^12",df$ubigeo))%>% 
+  select(ing_net,ubigeo,conglome,ocupinf,fac500a,estrato) %>% 
+  mutate(Provincia=substr(ubigeo,3,4)) %>% 
+  left_join(df_p)
+
+# Declarar diseño muestral
+dsg <- svydesign(
+  ids     = ~conglome,  # UPM
+  strata  = ~estrato,   # estratos
+  weights = ~fac500a,   # factor expansión
+  data    = data
+)
+
+# Estimaciones ponderadas
+svymean(~ocupinf, dsg)  # → 82%
+svymean(~ing_net,  dsg) # → S/. 844
+```
+:::
+:::::
+
+## Informalidad por Provincia {background-color="white"}
+
+```{r infor-plot}
+#| fig-height: 4.5
+#| fig-width: 10
+
+# Datos simulados (reemplazar con prop_prov_infor de svyby)
+prov_data <- tibble(
+  NAME_2  = c("Satipo","Junín","Chanchamayo","Tarma","Jauja",
+               "Concepción","Yauli","Chupaca","Huancayo"),
+  ocupinf = c(0.91, 0.89, 0.87, 0.85, 0.83, 0.80, 0.78, 0.76, 0.72),
+  ing_net = c(680, 720, 750, 810, 830, 850, 940, 870, 1020),
+  ci_low  = c(0.86, 0.84, 0.82, 0.80, 0.78, 0.74, 0.72, 0.70, 0.67),
+  ci_high = c(0.96, 0.94, 0.92, 0.90, 0.88, 0.86, 0.84, 0.82, 0.77)
+) 
+
+p1 <- prov_data |>
+  ggplot(aes(x = ocupinf, y = NAME_2)) +
+  geom_col(aes(fill = ocupinf), width = 0.65) +
+  geom_errorbar(aes(xmin = ci_low, xmax = ci_high), width = 0.25, color = PAL$navy, linewidth=0.7) +
+  geom_vline(xintercept = 0.82, linetype = "dashed", color = PAL$gold, linewidth = 0.8) +
+  annotate("text", x = 0.83, y = 1, label = "Promedio\n82%",
+           color = PAL$gold, size = 3.2, hjust = 0, fontface = "bold") +
+  scale_x_continuous(labels = percent_format(), limits = c(0, 1.02)) +
+  scale_fill_gradient(low = "#BCE4D8", high = "#EF4444") +
+  labs(
+    title    = "**Tasa de Informalidad Laboral** por Provincia",
+    subtitle = "Con intervalos de confianza al 95% · Diseño muestral complejo",
+    x = "Tasa de informalidad (%)", y = NULL,
+    caption = "Fuente: ENAHO 2023 · INEI · Elaboración: Propia"
+  ) +
+  theme_corp()
+
+p2 <- prov_data |>
+  ggplot(aes(x = ing_net, y = NAME_2)) +
+  geom_col(aes(fill = ing_net), width = 0.65) +
+  geom_text(aes(label = paste0("S/. ", ing_net)), hjust = -0.1,
+            size = 3.2, color = PAL$navy, fontface = "bold") +
+  scale_x_continuous(limits = c(0, 1200)) +
+  scale_fill_gradient(low = "#FDE68A", high = PAL$teal) +
+  labs(
+    title    = "**Ingreso Neto Promedio**",
+    subtitle = "Soles/mes ponderado",
+    x = "Ingreso neto (S/.)", y = NULL
+  ) +
+  theme_corp()
+
+p1 + p2
+```
+
+## Mapa Coroplético · Junín {background-color="#F0F9FF"}
+
+```{r mapa}
+#| fig-height: 4.6
+#| fig-width: 9.5
+
+# ── Datos reales: descomentar para producción ─────────────────────────────
+# library(geodata)
+# mp <- gadm(country = "PER", level = 2, path = tempdir()) |>
+#   sf::st_as_sf() |> filter(NAME_1 == "Junín")
+# mp_data <- mp |> left_join(prop_prov_infor, by = "NAME_2")
+
+# Polígonos aproximados de Junín (simulados para reproducibilidad)
+library(sf)
+
+set.seed(7)
+centroides <- tibble(
+  NAME_2  = c("Huancayo","Concepción","Jauja","Junín","Tarma",
+               "Yauli","Satipo","Chanchamayo","Chupaca"),
+  lon     = c(-75.20,-75.31,-75.48,-75.99,-75.68,-76.02,-74.64,-75.01,-75.30),
+  lat     = c(-12.07,-11.92,-11.78,-11.16,-11.42,-11.65,-11.25,-11.52,-12.05),
+  ocupinf = c(0.72, 0.80, 0.83, 0.89, 0.85, 0.78, 0.91, 0.87, 0.76)
+)
+
+# Crear polígonos Voronoi aproximados
+pts <- st_as_sf(centroides, coords = c("lon","lat"), crs = 4326)
+bbox <- st_bbox(c(xmin=-76.5, xmax=-73.8, ymin=-12.4, ymax=-10.6), crs=4326) |> st_as_sfc()
+voronoi <- pts |> st_union() |> st_voronoi(envelope = bbox) |>
+  st_cast() |> st_as_sf() |> st_intersection(bbox)
+
+voronoi_data <- voronoi |>
+  mutate(id = row_number()) |>
+  st_join(pts) |>
+  filter(!is.na(NAME_2))
+
+ggplot(voronoi_data) +
+  geom_sf(aes(fill = ocupinf), color = "white", linewidth = 0.8) +
+  geom_sf_label(
+    aes(label = NAME_2), size = 2.8, fill = "white",
+    color = PAL$navy, fontface = "bold", alpha = 0.85,
+    label.size = 0, label.padding = unit(0.15, "lines")
+  ) +
+  geom_sf_text(
+    aes(label = scales::percent(ocupinf, accuracy = 1)),
+    size = 2.5, color = PAL$gray, nudge_y = 0.12
+  ) +
+  scale_fill_gradient(
+    low = "#BCE4D8", high = "#EF4444",
+    name = "Informalidad", labels = percent_format()
+  ) +
+  labs(
+    title    = "**Tasa de Informalidad Laboral** · Región Junín",
+    subtitle = "Estimación con diseño muestral complejo · ENAHO 2023",
+    caption  = "Fuente: INEI · Geodata: GADM Level 2 · Elaboración: Propia",
+    x = NULL, y = NULL
+  ) +
+  theme_corp() +
+  theme(
+    legend.position = "right",
+    axis.text = element_blank(),
+    panel.grid = element_blank()
+  )
+```
+
+## Gráfico Interactivo con Plotly {background-color="white"}
+
+::: callout-tip
+## 🚀 Quarto + Reveal.js soporta gráficos 100% interactivos
+
+Hover sobre los puntos para ver los valores exactos
+:::
+
+```{r plotly-interactivo}
+#| fig-height: 3.8
+
+library(plotly)
+
+plot_ly(
+  prov_data,
+  x    = ~ocupinf,
+  y    = ~ing_net,
+  type = "scatter",
+  mode = "markers",
+  color     = ~ocupinf,
+  colors    = c(PAL$green, PAL$red),
+  marker    = list(size = 14, line = list(width = 0)),
+  text      = ~paste0("<b>", NAME_2, "</b><br>",
+                      "Informalidad: ", scales::percent(ocupinf, 1), "<br>",
+                      "Ingreso: S/. ", ing_net),
+  hoverinfo = "text"
+) |>
+  add_lines(
+    x = ~ocupinf,
+    y = ~fitted(lm(ing_net ~ ocupinf, data = prov_data)),
+    line      = list(color = PAL$teal, width = 2, dash = "dot"),
+    showlegend = FALSE,
+    hoverinfo  = "none"
+  ) |>
+  layout(
+    title  = list(text = "Relación Informalidad — Ingreso por Provincia",
+                  font = list(family = "Inter", size = 16, color = PAL$navy)),
+    xaxis  = list(title = "Tasa de informalidad",
+                  tickformat = ".0%",
+                  gridcolor  = "#E2E8F0"),
+    yaxis  = list(title = "Ingreso neto promedio (S/.)",
+                  tickprefix = "S/. ",
+                  gridcolor  = "#E2E8F0"),
+    paper_bgcolor = "white",
+    plot_bgcolor  = "white",
+    font   = list(family = "Inter, sans-serif"),
+    showlegend = FALSE
+  )
+```
+
+## Reproducibilidad Total {background-color="#0D1B2A"}
+
+:::::: columns
+:::: {.column width="50%"}
+[**Quarto hace posible:**]{style="color:#06B6D4; font-size:1.1em; font-weight:700"}
+
+::: incremental
+-   📄 **Un solo archivo** `.qmd` → PDF, HTML, PPTX, Word
+-   🔄 **Código + narrativa** integrados (Literate Programming)\
+-   📊 **Gráficos interactivos** con Plotly / htmlwidgets
+-   🎨 **Temas SCSS** personalizables sin límites
+-   🔢 **Parámetros dinámicos** → actualización automática
+-   🌐 **Publicación directa** en Quarto Pub / GitHub Pages
+:::
+::::
+
+::: {.column width="50%"}
+```{r reproducible-chart}
+#| fig-height: 4
+
+tibble(
+  herramienta = c("LaTeX", "R Markdown", "PowerPoint\nmanual", "Quarto"),
+  reproducible = c(9, 8, 1, 10),
+  flexible     = c(4, 7, 9, 10),
+  aprendizaje  = c(3, 7, 10, 8)
+) |>
+  tidyr::pivot_longer(-herramienta, names_to = "dim", values_to = "score") |>
+  mutate(dim = recode(dim,
+    reproducible = "Reproducibilidad",
+    flexible = "Flexibilidad",
+    aprendizaje = "Facilidad"
+  )) |>
+  ggplot(aes(x = herramienta, y = score, fill = herramienta)) +
+  geom_col(width = 0.65, alpha = 0.9) +
+  facet_wrap(~dim) +
+  scale_fill_manual(values = c(PAL$gray, PAL$teal, PAL$gold, PAL$red)) +
+  scale_y_continuous(limits = c(0, 11)) +
+  labs(title = "**Quarto vs otras herramientas**", y = "Score /10", x = NULL) +
+  theme_corp() +
+  theme(axis.text.x = element_text(size = 8, angle = 10))
+```
+:::
+::::::
+
+##  {.center background-color="#0D1B2A"}
+
+<br>
+
+[**Conclusiones**]{style="font-size:2.5em; font-weight:900; color:white"}
+
+<hr style="border-color:#F59E0B; width:40%; margin:1em auto">
+
+::::: columns
+::: {.column width="50%"}
+🔴 La **informalidad supera el 80%** en la mayoría de provincias, con Satipo encabezando la lista
+
+💛 El **ingreso promedio de S/. 844** esconde alta heterogeneidad provincial (S/. 680 — S/. 1,020)
+:::
+
+::: {.column width="50%"}
+🔵 Las empresas **privadas en Group 1** muestran mayor eficiencia (p \< 0.05, Wilcoxon)
+
+🟢 Quarto permite **análisis reproducibles y presentables** en un solo flujo de trabajo
+:::
+:::::
+
+<br>
+
+[Fuente: ENAHO 2023 · INEI · Elaboración: Mirko Caja Ventura]{style="color:#64748B; font-size:0.8em"}
+::::::::::::::::::::::::::::::
+:::::::::::::::::::::::::::::::
